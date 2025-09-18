@@ -8,20 +8,21 @@ from pathlib import Path
 import re
 from mineru.cli.common import convert_pdf_bytes_to_bytes_by_pypdfium2, prepare_env, read_fn
 
-from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers.json import JsonOutputParser
 
 from src.config import MILVUS_URL, MILVUS_DB_NAME, MILVUS_PW
 from src.database.milvus_handler import MilvusHandler
 from src.pdf_extractor.mineru_parser import parse_doc
-from src.prompts.prompt import CONTENT_SEARCHING_PROMPT
-from src.utils.utils import Utils
+from src.prompts import CONTENT_SEARCHING_PROMPT
+from src.utils import Utils, llm
+from src.advance_rag import AdvanceDocProcessor
+
 
 class PDFProcessor(MilvusHandler):
 
     def __init__(self):
-        super().__init__(host=MILVUS_URL, db_name=MILVUS_DB_NAME, password=MILVUS_PW)
+        super().__init__(host=MILVUS_URL, db_name=MILVUS_DB_NAME, password=MILVUS_PW, collection_name='annual_report_reits')
         # __dir__ = os.path.dirname(os.path.abspath(__file__))
 
         """
@@ -40,10 +41,12 @@ class PDFProcessor(MilvusHandler):
                 self.doc_path_list.append(doc_path)
         """END HERE"""
 
-        self.llm = ChatOpenAI(model_name="gpt-4o", temperature=0)
+        self.llm = llm
         self.parser = JsonOutputParser()
-
         self.utils = Utils()
+
+        # init advance rag
+        self.adv_rag_doc = AdvanceDocProcessor()
 
         # Configure logging
         logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -108,17 +111,28 @@ class PDFProcessor(MilvusHandler):
 
         return result
 
-    async def session_chunking(self, md_sections, session_name, company, year):
+
+
+    async def session_chunking(self, md_sections, session_name, company, year, apply_adv_rag=False):
+
+        ## remove image tag
+        md_sections = re.sub(r'!\[.*?\]\(.*?\)', '', md_sections)
 
         session_chunks = []
         # Step 1: Chunk the content
-        chunks = self.utils.split(md_sections)
+        chunks = self.utils.split(md_sections) ## Todo: remove :20
         self.logger.info(f"   📄 Created {len(chunks)} chunks")
 
         # Step 2: Generate embeddings for chunks
-        chunk_embeddings = await self.utils.a_embed_documents(chunks)
-        chunks = chunk_embeddings['text']
-        chunk_embeddings = chunk_embeddings['vector']
+        if apply_adv_rag:
+            original_chunks, modified_chunks = await self.adv_rag_doc.document_expansion(chunks)
+            chunks_embeddings_dict = await self.utils.a_embed_documents(modified_chunks)
+            chunks = original_chunks.copy()
+            chunk_embeddings = chunks_embeddings_dict['vector']
+        else:
+            chunks_embeddings_dict = await self.utils.a_embed_documents(chunks)
+            chunks = chunks_embeddings_dict['text']
+            chunk_embeddings = chunks_embeddings_dict['vector']
 
         if not chunk_embeddings or len(chunk_embeddings) != len(chunks):
             self.logger.error(f"   ❌ Embedding failed for {session_name}")
@@ -126,20 +140,22 @@ class PDFProcessor(MilvusHandler):
         self.logger.info(f"   🧠 Generated {len(chunk_embeddings)} embeddings")
 
         for i, (chunk_text, embedding) in enumerate(zip(chunks, chunk_embeddings)):
-            if len(chunk_text) >= 2000:
-                print('exceeding 2000')
-                continue
+            # if len(chunk_text) >= 2000:
+            #     print('exceeding 2000')
+            #     continue
             chunk_data = {
                 "session_name": session_name,
                 "company": company,
-                "year": year,
-                "chunk_text": chunk_text,
+                "date": year,
+                "doc_id": company + "_" + year,
+                "title": company + "_" + year,
+                "source_type": 'annual_report',
+                "content": chunk_text,
                 "chunk_index": i,
                 "chunk_length": len(chunk_text),
-                "embedding": embedding,
+                "dense_embedding": embedding,
                 "created_at": datetime.now().isoformat()
             }
-            print(len(chunk_text))
             session_chunks.append(chunk_data)
         return session_chunks
 
@@ -153,6 +169,20 @@ class PDFProcessor(MilvusHandler):
         company_year = self.extract_company_year(file_name)
         company = company_year['company']
         year = str(company_year['year'])
+
+        # # Todo: remove testing <start>
+        # company= ''
+        # year= ''
+        # session_name = ''
+        #
+        # with open("/data/zhuanghao/MyGithub/adv-ir-rag/data/output/IJM_2023/auto/IJM_2023_OVERVIEW.md", "r",
+        #           encoding="utf-8") as f:
+        #     md_sections = f.read()
+        #
+        # if md_sections is not None:
+        #     session_chunks = await self.session_chunking(md_sections, session_name, company, year)
+        #     all_chunks.extend(session_chunks)
+        # # Todo: remove testing <end>
 
         all_chunks = []
 
@@ -173,6 +203,7 @@ class PDFProcessor(MilvusHandler):
                                                      page_start=page_start,
                                                      page_end=page_end,
                                                      md_name=session_name)
+
             if md_sections is not None:
                 session_chunks = await self.session_chunking(md_sections, session_name, company, year)
                 all_chunks.extend(session_chunks)
@@ -188,7 +219,7 @@ class PDFProcessor(MilvusHandler):
             self.logger.info(f"✅ Stored {chunks_stored} chunks")
             # Log summary
             companies = set(chunk["company"] for chunk in all_chunks)
-            years = set(chunk["year"] for chunk in all_chunks)
+            years = set(chunk["date"] for chunk in all_chunks)
             sessions = set(chunk["session_name"] for chunk in all_chunks)
 
             self.logger.info(f"   📊 Companies: {', '.join(sorted(companies))}")
@@ -208,6 +239,7 @@ class PDFProcessor(MilvusHandler):
         for path in self.doc_path_list:
             file_name = str(Path(path).stem)
             pdf_bytes = read_fn(path)
+
             if '宁德时代' in file_name:
                 lang = 'ch'
             else:
@@ -216,11 +248,19 @@ class PDFProcessor(MilvusHandler):
             # file_name_list.append(file_name)
             # pdf_bytes_list.append(pdf_bytes)
             # lang_list.append(lang)
+
+
             page_results_dict = self.look_for_session_pages(pdf_bytes, file_name, lang)
 
             with open(os.path.join(self.output_dir, file_name, 'content_results.json'), "w", encoding="utf-8") as f:
                 json.dump(page_results_dict, f, ensure_ascii=False, indent=4)
 
+            # # Todo remove testing
+            # page_results_dict = {}
+            # pdf_bytes = ''
+            # file_name = ''
+            # lang = ''
+            # # Todo end
             all_chunks = await self.extract_content_session(pdf_bytes, file_name, lang, page_results_dict)
             chunks_stored = await self.insert_into_vdb(all_chunks)
 

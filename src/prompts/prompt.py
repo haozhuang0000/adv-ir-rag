@@ -49,4 +49,98 @@ and following this format:
 {format_instructions}
 """
 
-""""""
+class DocPrompt:
+
+    KEYWORD_PROMPT: str = """
+    You are an expert keyword extractor, capable of identifying any type of keyword.
+    Given a text, your task is to extract meaningful keywords.
+    The extracted keywords should reflect domain-specific knowledge, such as finance, technology, or other specialized fields.
+    
+    <Text>
+    {chunk_text}
+    </Text>
+    
+    Please follow this format instruction:
+    {format_instructions}
+    """
+
+    QA_GENERATION_PROMPT: str = """
+    Analyze the input text and generate essential questions that, when answered, 
+    capture the main points of the text. Each question should be one line without numbering or prefixes.
+    You should generate no more than 8 questions. Each question must less than 30 tokens.
+    
+    <Text>:
+    {chunk_text}
+    </Text>
+    
+    Please follow this format instruction:
+    {format_instructions}
+    """
+
+class QueryPrompt:
+
+
+    QUERY_REWRITE_PROMPT = """
+    You are an AI assistant tasked with reformulating user queries to improve retrieval in a RAG system. 
+    Given the original query, rewrite it to be more specific, detailed, and likely to retrieve relevant information.
+    
+    <Original query>
+    {query}
+    </Original query>
+    
+    Please follow this format instruction:
+    {format_instructions}
+    """
+
+    QUERY_STEP_BACK_PROMPT = """
+    You are an AI assistant tasked with generating broader, more general queries to improve context retrieval in a RAG system.
+    Given the original query, generate a step-back query that is more general and can help retrieve relevant background information.
+    
+    <Original query>
+    {query}
+    </Original query>
+    
+    Please follow this format instruction:
+    {format_instructions}
+    """
+
+    QUERY_MULTI_GEN_PROMPT = """
+    You are an AI language model assistant. 
+    
+    Your task is to generate 3 different versions of the given user question to retrieve relevant documents from a vector database.
+    
+    By generating multiple perspectives on the user question, 
+    your goal is to help the user overcome some of the limitations of distance-based similarity search. 
+        
+    <Original query>
+    {query}
+    </Original query>
+    
+    Please follow this format instruction:
+    {format_instructions}
+    """
+
+    QUERY_SUBQUERY_PROMPT = """
+    You are an AI assistant tasked with breaking down complex queries into simpler sub-queries for a RAG system.
+    Given the original query, decompose it into 2-4 simpler sub-queries that, when answered together, would provide a comprehensive response to the original query.
+    
+    <Original query>
+    {query}
+    </Original query>
+    
+    <Example>
+    Example: What are the impacts of interest rate hikes on the financial system?
+    Sub-queries:
+        1. How do interest rate hikes affect stock market valuations?
+        2. What is the impact of higher interest rates on bond prices and yields?
+        3. How do rising interest rates influence bank lending and credit availability?
+        4. What are the effects of interest rate hikes on consumer spending and business investment?
+    </Example>
+    
+    Please follow this format instruction:
+    {format_instructions}
+    """
+
+class PostGenPrompt:
+
+    pass

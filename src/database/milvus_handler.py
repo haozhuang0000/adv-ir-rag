@@ -17,12 +17,12 @@ from pymilvus import RRFRanker
 class MilvusHandler:
     """Milvus vector database client for annual report content"""
 
-    def __init__(self, host: str, port: str = "19530", db_name: str = "default", password: str = None):
+    def __init__(self, host: str, port: str = "19530", db_name: str = "default", password: str = None, collection_name: str='annual_report_0821'):
         self.host = host
         self.port = port
         self.db_name = db_name
         self.password = password
-        self.collection_name = "annual_report_0821"  # Changed from documents_chunks
+        self.collection_name = collection_name # Changed from documents_chunks
         self.collection = None
 
         self.client = MilvusClient(uri=self.host, token=f"root:{self.password}", db_name=self.db_name)
@@ -53,23 +53,39 @@ class MilvusHandler:
         """Create the annual report collection"""
         schema = self.client.create_schema()
 
-        schema.add_field(field_name="chunk_id", datatype=DataType.INT64, is_primary=True, auto_id=True)
+        # schema.add_field(field_name="chunk_id", datatype=DataType.INT64, is_primary=True, auto_id=True)
+        # schema.add_field(field_name="session_name", datatype=DataType.VARCHAR, max_length=100)
+        # schema.add_field(field_name="company", datatype=DataType.VARCHAR, max_length=100)
+        # schema.add_field(field_name="year", datatype=DataType.VARCHAR, max_length=10)
+        # # schema.add_field(field_name="item_type", datatype=DataType.VARCHAR, max_length=50)
+        # # schema.add_field(field_name="item_title", datatype=DataType.VARCHAR, max_length=200)
+        # schema.add_field(field_name="chunk_text", datatype=DataType.VARCHAR, max_length=10000, enable_analyzer=True) ## Chinese character required more bytes to store
+        # schema.add_field(field_name="chunk_index", datatype=DataType.INT64)
+        # schema.add_field(field_name="chunk_length", datatype=DataType.INT64)
+        # schema.add_field(field_name="embedding", datatype=DataType.FLOAT_VECTOR, dim=4096)  # Updated to 4096
+        # # schema.add_field(field_name="metadata", datatype=DataType.VARCHAR, max_length=1000)
+        # schema.add_field(field_name="created_at", datatype=DataType.VARCHAR, max_length=50)
+        # schema.add_field(field_name="sparse_embedding", datatype=DataType.SPARSE_FLOAT_VECTOR)
+
+        schema.add_field(field_name="id", datatype=DataType.INT64, is_primary=True, auto_id=True)
         schema.add_field(field_name="session_name", datatype=DataType.VARCHAR, max_length=100)
         schema.add_field(field_name="company", datatype=DataType.VARCHAR, max_length=100)
-        schema.add_field(field_name="year", datatype=DataType.VARCHAR, max_length=10)
+        schema.add_field(field_name="date", datatype=DataType.VARCHAR, max_length=10)
+        schema.add_field(field_name="doc_id", datatype=DataType.VARCHAR, max_length=100)
+        schema.add_field(field_name="title", datatype=DataType.VARCHAR, max_length=100)
+        schema.add_field(field_name="source_type", datatype=DataType.VARCHAR, max_length=100)
         # schema.add_field(field_name="item_type", datatype=DataType.VARCHAR, max_length=50)
         # schema.add_field(field_name="item_title", datatype=DataType.VARCHAR, max_length=200)
-        schema.add_field(field_name="chunk_text", datatype=DataType.VARCHAR, max_length=10000, enable_analyzer=True) ## Chinese character required more bytes to store
+        schema.add_field(field_name="content", datatype=DataType.VARCHAR, max_length=10000, enable_analyzer=True) ## Chinese character required more bytes to store
         schema.add_field(field_name="chunk_index", datatype=DataType.INT64)
         schema.add_field(field_name="chunk_length", datatype=DataType.INT64)
-        schema.add_field(field_name="embedding", datatype=DataType.FLOAT_VECTOR, dim=4096)  # Updated to 4096
+        schema.add_field(field_name="dense_embedding", datatype=DataType.FLOAT_VECTOR, dim=4096)  # Updated to 4096
         # schema.add_field(field_name="metadata", datatype=DataType.VARCHAR, max_length=1000)
         schema.add_field(field_name="created_at", datatype=DataType.VARCHAR, max_length=50)
         schema.add_field(field_name="sparse_embedding", datatype=DataType.SPARSE_FLOAT_VECTOR)
-
         bm25_function = Function(
             name="text_bm25_emb",  # Function name
-            input_field_names=["chunk_text"],  # Name of the VARCHAR field containing raw text data
+            input_field_names=["content"],  # Name of the VARCHAR field containing raw text data
             output_field_names=["sparse_embedding"],
             # Name of the SPARSE_FLOAT_VECTOR field reserved to store generated embeddings
             function_type=FunctionType.BM25,  # Set to `BM25`
@@ -110,8 +126,7 @@ class MilvusHandler:
             try:
                 self.client.insert(collection_name=self.collection_name, data=chunks)
             except Exception as e:
-                print(chunks)
-                print(chunks)
+                print(e)
             inserted_count = len(chunks)
             self.logger.info(f"✅ Inserted {inserted_count} chunks into Milvus")
             return inserted_count
